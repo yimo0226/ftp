@@ -985,6 +985,19 @@ func (c *ServerConn) Append(path string, r io.Reader) error {
 	return errs.ErrorOrNil()
 }
 
+func (c *ServerConn) StorFile(path string) (*Response, error) {
+	return c.StorFromFile(path, 0)
+}
+
+func (c *ServerConn) StorFromFile(path string, offset uint64) (*Response, error) {
+	conn, err := c.cmdDataConnFrom(offset, "STOR %s", path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Response{conn: conn, c: c}, nil
+}
+
 // Rename renames a file on the remote FTP server.
 func (c *ServerConn) Rename(from, to string) error {
 	_, _, err := c.cmd(StatusRequestFilePending, "RNFR %s", from)
@@ -1105,6 +1118,10 @@ func (c *ServerConn) Quit() error {
 // Read implements the io.Reader interface on a FTP data connection.
 func (r *Response) Read(buf []byte) (int, error) {
 	return r.conn.Read(buf)
+}
+
+func (r *Response) Write(buf []byte) (int, error) {
+	return r.conn.Write(buf)
 }
 
 // Close implements the io.Closer interface on a FTP data connection.
