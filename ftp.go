@@ -1150,6 +1150,14 @@ func (r *Response) SetDeadline(t time.Time) error {
 	return r.conn.SetDeadline(t)
 }
 
+func (r *Response) SetReadDeadline(t time.Time) error {
+	return r.conn.SetReadDeadline(t)
+}
+
+func (r *Response) SetWriteDeadline(t time.Time) error {
+	return r.conn.SetWriteDeadline(t)
+}
+
 // String returns the string representation of EntryType t.
 func (t EntryType) String() string {
 	return [...]string{"file", "folder", "link"}[t]
