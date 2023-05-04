@@ -5,10 +5,14 @@ package ftp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/textproto"
 	"strconv"
@@ -649,6 +653,7 @@ func (c *ServerConn) NameList(path string) (entries []string, err error) {
 	if path == "" {
 		space = ""
 	}
+	path = c.toGbk(path)
 	conn, err := c.cmdDataConnFrom(0, "NLST%s%s", space, path)
 	if err != nil {
 		return nil, err
@@ -693,6 +698,7 @@ func (c *ServerConn) List(path string) (entries []*Entry, err error) {
 	if path == "" {
 		space = ""
 	}
+	path = c.toGbk(path)
 	conn, err := c.cmdDataConnFrom(0, "%s%s%s", cmd, space, path)
 	if err != nil {
 		return nil, err
@@ -707,6 +713,7 @@ func (c *ServerConn) List(path string) (entries []*Entry, err error) {
 	for scanner.Scan() {
 		entry, errParse := parser(scanner.Text(), now, c.options.location)
 		if errParse == nil {
+			entry.Name = c.toUtf8(entry.Name)
 			entries = append(entries, entry)
 		}
 	}
@@ -732,6 +739,7 @@ func (c *ServerConn) GetEntry(path string) (entry *Entry, err error) {
 	if path == "" {
 		space = ""
 	}
+	path = c.toGbk(path)
 	_, msg, err := c.cmd(StatusRequestedFileActionOK, "%s%s%s", "MLST", space, path)
 	if err != nil {
 		return nil, err
@@ -770,6 +778,7 @@ func (c *ServerConn) GetEntry(path string) (entry *Entry, err error) {
 			return nil, err
 		}
 	}
+	e.Name = c.toUtf8(e.Name)
 	return e, nil
 }
 
@@ -782,6 +791,7 @@ func (c *ServerConn) IsTimePreciseInList() bool {
 // ChangeDir issues a CWD FTP command, which changes the current directory to
 // the specified path.
 func (c *ServerConn) ChangeDir(path string) error {
+	path = c.toGbk(path)
 	_, _, err := c.cmd(StatusRequestedFileActionOK, "CWD %s", path)
 	return err
 }
@@ -814,6 +824,7 @@ func (c *ServerConn) CurrentDir() (string, error) {
 
 // FileSize issues a SIZE FTP command, which Returns the size of the file
 func (c *ServerConn) FileSize(path string) (int64, error) {
+	path = c.toGbk(path)
 	_, msg, err := c.cmd(StatusFile, "SIZE %s", path)
 	if err != nil {
 		return 0, err
@@ -829,6 +840,7 @@ func (c *ServerConn) GetTime(path string) (time.Time, error) {
 	if !c.mdtmSupported {
 		return t, errors.New("GetTime is not supported")
 	}
+	path = c.toGbk(path)
 	_, msg, err := c.cmd(StatusFile, "MDTM %s", path)
 	if err != nil {
 		return t, err
@@ -848,6 +860,7 @@ func (c *ServerConn) IsGetTimeSupported() bool {
 // See "mdtm_write" in https://security.appspot.com/vsftpd/vsftpd_conf.html
 func (c *ServerConn) SetTime(path string, t time.Time) (err error) {
 	utime := t.In(time.UTC).Format(timeFormat)
+	path = c.toGbk(path)
 	switch {
 	case c.mfmtSupported:
 		_, _, err = c.cmd(StatusFile, "MFMT %s %s", utime, path)
@@ -870,6 +883,7 @@ func (c *ServerConn) IsSetTimeSupported() bool {
 //
 // The returned ReadCloser must be closed to cleanup the FTP data connection.
 func (c *ServerConn) Retr(path string) (*Response, error) {
+	path = c.toGbk(path)
 	return c.RetrFrom(path, 0)
 }
 
@@ -878,6 +892,7 @@ func (c *ServerConn) Retr(path string) (*Response, error) {
 //
 // The returned ReadCloser must be closed to cleanup the FTP data connection.
 func (c *ServerConn) RetrFrom(path string, offset uint64) (*Response, error) {
+	path = c.toGbk(path)
 	conn, err := c.cmdDataConnFrom(offset, "RETR %s", path)
 	if err != nil {
 		return nil, err
@@ -891,6 +906,7 @@ func (c *ServerConn) RetrFrom(path string, offset uint64) (*Response, error) {
 //
 // Hint: io.Pipe() can be used if an io.Writer is required.
 func (c *ServerConn) Stor(path string, r io.Reader) error {
+	path = c.toGbk(path)
 	return c.StorFrom(path, r, 0)
 }
 
@@ -918,6 +934,7 @@ func (c *ServerConn) checkDataShut() error {
 //
 // Hint: io.Pipe() can be used if an io.Writer is required.
 func (c *ServerConn) StorFrom(path string, r io.Reader, offset uint64) error {
+	path = c.toGbk(path)
 	conn, err := c.cmdDataConnFrom(offset, "STOR %s", path)
 	if err != nil {
 		return err
@@ -963,6 +980,7 @@ func (c *ServerConn) StorFrom(path string, r io.Reader, offset uint64) error {
 //
 // Hint: io.Pipe() can be used if an io.Writer is required.
 func (c *ServerConn) Append(path string, r io.Reader) error {
+	path = c.toGbk(path)
 	conn, err := c.cmdDataConnFrom(0, "APPE %s", path)
 	if err != nil {
 		return err
@@ -990,6 +1008,7 @@ func (c *ServerConn) StorFile(path string) (*Response, error) {
 }
 
 func (c *ServerConn) StorFromFile(path string, offset uint64) (*Response, error) {
+	path = c.toGbk(path)
 	conn, err := c.cmdDataConnFrom(offset, "STOR %s", path)
 	if err != nil {
 		return nil, err
@@ -1000,6 +1019,8 @@ func (c *ServerConn) StorFromFile(path string, offset uint64) (*Response, error)
 
 // Rename renames a file on the remote FTP server.
 func (c *ServerConn) Rename(from, to string) error {
+	to = c.toGbk(to)
+	from = c.toGbk(from)
 	_, _, err := c.cmd(StatusRequestFilePending, "RNFR %s", from)
 	if err != nil {
 		return err
@@ -1012,6 +1033,7 @@ func (c *ServerConn) Rename(from, to string) error {
 // Delete issues a DELE FTP command to delete the specified file from the
 // remote FTP server.
 func (c *ServerConn) Delete(path string) error {
+	path = c.toGbk(path)
 	_, _, err := c.cmd(StatusRequestedFileActionOK, "DELE %s", path)
 	return err
 }
@@ -1059,6 +1081,7 @@ func (c *ServerConn) RemoveDirRecur(path string) error {
 // MakeDir issues a MKD FTP command to create the specified directory on the
 // remote FTP server.
 func (c *ServerConn) MakeDir(path string) error {
+	path = c.toGbk(path)
 	_, _, err := c.cmd(StatusPathCreated, "MKD %s", path)
 	return err
 }
@@ -1066,6 +1089,7 @@ func (c *ServerConn) MakeDir(path string) error {
 // RemoveDir issues a RMD FTP command to remove the specified directory from
 // the remote FTP server.
 func (c *ServerConn) RemoveDir(path string) error {
+	path = c.toGbk(path)
 	_, _, err := c.cmd(StatusRequestedFileActionOK, "RMD %s", path)
 	return err
 }
@@ -1161,4 +1185,38 @@ func (r *Response) SetWriteDeadline(t time.Time) error {
 // String returns the string representation of EntryType t.
 func (t EntryType) String() string {
 	return [...]string{"file", "folder", "link"}[t]
+}
+
+func (c *ServerConn) toGbk(path string) string {
+	if c.options.disableUTF8 {
+		var b, _ = utf8ToGbk([]byte(path))
+		return string(b)
+	}
+	return path
+}
+
+func (c *ServerConn) toUtf8(path string) string {
+	if c.options.disableUTF8 {
+		var b, _ = gbkToUtf8([]byte(path))
+		return string(b)
+	}
+	return path
+}
+
+func gbkToUtf8(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+	d, e := ioutil.ReadAll(reader)
+	if e != nil {
+		return nil, e
+	}
+	return d, nil
+}
+
+func utf8ToGbk(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewEncoder())
+	d, e := ioutil.ReadAll(reader)
+	if e != nil {
+		return nil, e
+	}
+	return d, nil
 }
